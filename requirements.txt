@@ -1,0 +1,5 @@
+fastapi>=0.110
+lark-oapi>=1.6.8
+python-dotenv>=1.0
+urllib3<2
+uvicorn[standard]>=0.29
