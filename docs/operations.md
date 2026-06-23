@@ -134,6 +134,16 @@ session_id=ses_xxx mode=incremental
 - 当前模型是否可用。
 - 直接在终端执行同样的 `opencode run` 是否能完成。
 
+### OpenCode 中间分析也被发到飞书
+
+默认不会发送全部中间文本。服务只回复 `opencode run --format json` 中最后一个文本输出。
+
+如果需要把 OpenCode 过程中产生的所有文本输出都聚合后发到飞书，显式开启：
+
+```env
+OPENCODE_REPLY_FULL_OUTPUT=true
+```
+
 ### 重复回复
 
 服务会用飞书 `event_id` 做 24 小时去重。如果仍重复，通常是：

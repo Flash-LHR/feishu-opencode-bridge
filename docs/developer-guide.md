@@ -51,6 +51,7 @@ PromptBuilder.render
   -> 人名：内容
 OpenCodeClient.run
   -> opencode run [--session ...] [--model ...] --format json <prompt>
+  -> 默认只取最后一个 text part 作为飞书回复
 StateStore.set_topic_session
   -> 保存 session_id 和 last_sent_message_id
 ```

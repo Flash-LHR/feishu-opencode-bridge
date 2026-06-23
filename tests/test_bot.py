@@ -115,6 +115,7 @@ def _settings(path: Path) -> Settings:
         opencode_agent=None,
         opencode_attach_url=None,
         opencode_skip_permissions=False,
+        opencode_reply_full_output=False,
         send_processing_message=False,
         processing_reaction_emoji="Typing",
         done_reaction_emoji="DONE",

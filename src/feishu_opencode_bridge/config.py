@@ -87,6 +87,7 @@ class Settings:
     opencode_agent: Optional[str]
     opencode_attach_url: Optional[str]
     opencode_skip_permissions: bool
+    opencode_reply_full_output: bool
 
     send_processing_message: bool
     processing_reaction_emoji: Optional[str]
@@ -132,6 +133,7 @@ class Settings:
             opencode_agent=_get_optional("OPENCODE_AGENT"),
             opencode_attach_url=_get_optional("OPENCODE_ATTACH_URL"),
             opencode_skip_permissions=_get_bool("OPENCODE_SKIP_PERMISSIONS", False),
+            opencode_reply_full_output=_get_bool("OPENCODE_REPLY_FULL_OUTPUT", False),
             send_processing_message=_get_bool("BRIDGE_SEND_PROCESSING_MESSAGE", False),
             processing_reaction_emoji=_get_optional_default("FEISHU_PROCESSING_REACTION_EMOJI", "Typing"),
             done_reaction_emoji=_get_optional_default("FEISHU_DONE_REACTION_EMOJI", "DONE"),

@@ -29,6 +29,7 @@ def create_runtime(settings: Settings) -> Runtime:
         agent=settings.opencode_agent,
         attach_url=settings.opencode_attach_url,
         skip_permissions=settings.opencode_skip_permissions,
+        reply_full_output=settings.opencode_reply_full_output,
     )
     state = StateStore(settings.state_path)
     bot = FeishuOpenCodeBot(settings, feishu, opencode, state)

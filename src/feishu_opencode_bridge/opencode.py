@@ -28,6 +28,7 @@ class OpenCodeClient:
         agent: Optional[str] = None,
         attach_url: Optional[str] = None,
         skip_permissions: bool = False,
+        reply_full_output: bool = False,
     ) -> None:
         self._binary = binary
         self._workdir = workdir
@@ -35,6 +36,7 @@ class OpenCodeClient:
         self._agent = agent
         self._attach_url = attach_url
         self._skip_permissions = skip_permissions
+        self._reply_full_output = reply_full_output
 
     def check_ready(self) -> str:
         path = shutil.which(self._binary)
@@ -116,7 +118,8 @@ class OpenCodeClient:
                     texts.append(part["text"])
 
         if parsed_any:
-            return "".join(texts).strip(), session_id
+            output = "".join(texts) if self._reply_full_output else _last_text_part(texts)
+            return output.strip(), session_id
         return stdout.strip(), None
 
     def list_models(self, provider: Optional[str] = None, refresh: bool = False) -> str:
@@ -138,3 +141,10 @@ class OpenCodeClient:
         if completed.returncode != 0:
             raise OpenCodeError(output or f"opencode models failed with exit code {completed.returncode}")
         return output or "(OpenCode 没有返回模型列表)"
+
+
+def _last_text_part(texts: List[str]) -> str:
+    for text in reversed(texts):
+        if text.strip():
+            return text
+    return ""

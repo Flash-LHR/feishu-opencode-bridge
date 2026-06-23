@@ -75,6 +75,7 @@ def run_check(args) -> None:
         agent=settings.opencode_agent,
         attach_url=settings.opencode_attach_url,
         skip_permissions=settings.opencode_skip_permissions,
+        reply_full_output=settings.opencode_reply_full_output,
     )
     try:
         print(f"OpenCode: {opencode.check_ready()}")

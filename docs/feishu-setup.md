@@ -161,6 +161,7 @@ contact:contact.base:readonly
 | `OPENCODE_AGENT` | 空 | 传给 `opencode run --agent` |
 | `OPENCODE_ATTACH_URL` | 空 | 传给 `opencode run --attach` |
 | `OPENCODE_SKIP_PERMISSIONS` | `false` | 是否传 `--dangerously-skip-permissions` |
+| `OPENCODE_REPLY_FULL_OUTPUT` | `false` | 默认只把 OpenCode 最后一个文本输出回复到飞书；设为 `true` 时聚合所有文本输出 |
 
 ### 卡片发送页面
 
