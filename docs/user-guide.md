@@ -7,7 +7,36 @@
 - 群聊话题中明确 @ 机器人的消息。
 - 单聊中直接发给机器人的消息。
 
+如果开启 `BRIDGE_AUTO_TRIGGER_WITHOUT_MENTION=true`，机器人会自动处理收到的外部 `interactive` 卡片，不再要求 @。这适合把机器人放进告警群做 oncall 分析；机器人自己发送的回复不会再次触发。
+
 在话题里第一次 @ 机器人时，服务会把当前可读取的话题上下文发给 OpenCode，并记录返回的 OpenCode session。之后同一话题继续 @ 机器人时，会复用该 session，只把新增消息发给 OpenCode。
+
+## 自动触发模式
+
+在 `.env` 里开启：
+
+```env
+BRIDGE_AUTO_TRIGGER_WITHOUT_MENTION=true
+BRIDGE_AUTO_TRIGGER_PROMPT=请作为 oncall 助手处理下面这条飞书消息或告警。如果这是告警，请给出结论、影响、证据和建议动作；如果信息不足，请明确还需要什么。
+BRIDGE_AUTO_IGNORE_SEVERITIES=info
+BRIDGE_AUTO_IGNORE_KEYWORDS=测试环境,已恢复,演练
+BRIDGE_AUTO_DAILY_LIMIT=20
+BRIDGE_AUTO_DAILY_LIMIT_TIMEZONE=Asia/Shanghai
+BRIDGE_AUTO_REUSE_WINDOW_SECONDS=86400
+```
+
+开启后：
+
+- 外部应用机器人发送的 `interactive` 卡片不需要 @ 也会触发 OpenCode，适合处理告警卡片。
+- 触发前会先解析告警文本，提取告警名、级别、服务、环境，并生成 fingerprint。
+- 命中 `BRIDGE_AUTO_IGNORE_SEVERITIES` 或 `BRIDGE_AUTO_IGNORE_KEYWORDS` 的告警会静默跳过。
+- 同类告警在 `BRIDGE_AUTO_REUSE_WINDOW_SECONDS` 窗口内再次出现时，会直接复用上次结论，不再调用 OpenCode。
+- `BRIDGE_AUTO_DAILY_LIMIT` 限制每天最多新增自动分析次数；设为 `0` 表示不限。复用已有结论不消耗次数。
+- 普通文本消息不会自动触发；同一告警话题里后续人工讨论只会进入缓存。
+- `/ping`、`/model`、`/reset` 这类命令仍然只在 @ 机器人或单聊时执行。
+- 同一话题仍会复用 OpenCode session；后续如果有人 @ 机器人，会把上次回复后的新增讨论发给 OpenCode。
+
+当前版本的触发范围收敛在外部卡片上；不按群或发送方限制，告警等级和关键词可通过配置过滤。
 
 ## 多轮会话规则
 

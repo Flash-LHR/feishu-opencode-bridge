@@ -20,6 +20,7 @@ class StateStore:
             "seen_events": {},
             "sessions": {},
             "threads": {},
+            "oncall": {},
             "users": {},
         }
         self._load()
@@ -34,6 +35,7 @@ class StateStore:
             self._data.setdefault("seen_events", {})
             self._data.setdefault("sessions", {})
             self._data.setdefault("threads", {})
+            self._data.setdefault("oncall", {})
             self._data.setdefault("users", {})
 
     def _save(self) -> None:
@@ -130,6 +132,59 @@ class StateStore:
             return
         with self._lock:
             self._data.setdefault("users", {})[user_id] = display_name
+            self._save()
+
+    def claim_oncall_analysis_slot(self, day_key: str, limit: int) -> bool:
+        if not day_key:
+            return True
+        with self._lock:
+            oncall = self._data.setdefault("oncall", {})
+            daily = oncall.setdefault("daily", {})
+            item = daily.setdefault(day_key, {"analyzed": 0})
+            analyzed = int(item.get("analyzed") or 0)
+            if limit > 0 and analyzed >= limit:
+                return False
+            item["analyzed"] = analyzed + 1
+            self._save()
+            return True
+
+    def release_oncall_analysis_slot(self, day_key: str) -> None:
+        if not day_key:
+            return
+        with self._lock:
+            item = self._data.setdefault("oncall", {}).setdefault("daily", {}).get(day_key)
+            if not isinstance(item, dict):
+                return
+            item["analyzed"] = max(0, int(item.get("analyzed") or 0) - 1)
+            self._save()
+
+    def get_oncall_conclusion(self, fingerprint: str) -> Optional[Dict[str, Any]]:
+        if not fingerprint:
+            return None
+        with self._lock:
+            item = self._data.setdefault("oncall", {}).setdefault("alerts", {}).get(fingerprint)
+            return dict(item) if isinstance(item, dict) else None
+
+    def set_oncall_conclusion(
+        self,
+        alert: Dict[str, Any],
+        output: str,
+        topic_id: str,
+        message_id: str,
+        analyzed_at: int,
+    ) -> None:
+        fingerprint = str(alert.get("fingerprint") or "")
+        if not fingerprint or not output:
+            return
+        with self._lock:
+            self._data.setdefault("oncall", {}).setdefault("alerts", {})[fingerprint] = {
+                "alert": dict(alert),
+                "fingerprint": fingerprint,
+                "last_output": output,
+                "last_topic_id": topic_id,
+                "last_message_id": message_id,
+                "last_analyzed_at": int(analyzed_at or 0),
+            }
             self._save()
 
 

@@ -38,7 +38,12 @@ class TopicContextBuilder:
         self._state = state
         self._prompt = prompt
 
-    def build_payload(self, incoming: IncomingEvent) -> OpenCodePayload:
+    def build_payload(
+        self,
+        incoming: IncomingEvent,
+        include_app_messages: bool = False,
+        include_command_messages: bool = False,
+    ) -> OpenCodePayload:
         topic_id = incoming.message.topic_id
         session = self._state.get_topic_session(topic_id)
         session_id = str(session.get("session_id") or "") if session else ""
@@ -50,10 +55,18 @@ class TopicContextBuilder:
             selected = messages
             mode = "full"
 
-        selected = self._prompt.input_messages(selected)
+        selected = self._prompt.input_messages(
+            selected,
+            include_app_messages=include_app_messages,
+            include_command_messages=include_command_messages,
+        )
         if not any(message.message_id == incoming.message.message_id for message in selected):
             selected.append(incoming.message)
-            selected = self._prompt.input_messages(merge_messages(selected))
+            selected = self._prompt.input_messages(
+                merge_messages(selected),
+                include_app_messages=include_app_messages,
+                include_command_messages=include_command_messages,
+            )
 
         return OpenCodePayload(
             topic_id=topic_id,

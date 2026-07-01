@@ -94,7 +94,11 @@ pgrep -fl "feishu_opencode_bridge|uvicorn|python.*feishu"
 
 ### `/cards/send` 日志里没有 OpenCode prompt
 
-正常。`/cards/send` 只发送卡片，不调用 OpenCode。需要在飞书话题里 @ 机器人，才会触发 OpenCode。
+默认正常。`/cards/send` 只发送卡片，不调用 OpenCode。需要在飞书话题里 @ 机器人，才会触发 OpenCode。
+
+如果开启了 `BRIDGE_AUTO_TRIGGER_WITHOUT_MENTION=true`，外部应用机器人发送的 `interactive` 卡片会自动触发 OpenCode。普通文本和当前应用自己发送的卡片仍只缓存，不会触发，避免在告警讨论里反复插话或形成自循环。
+
+自动触发前会先经过 oncall 策略层。如果命中 `BRIDGE_AUTO_IGNORE_SEVERITIES`、`BRIDGE_AUTO_IGNORE_KEYWORDS` 或 `BRIDGE_AUTO_DAILY_LIMIT`，日志里会出现 `Oncall skipped alert`，这是预期行为。
 
 ### 第二轮 prompt 不是全量
 
@@ -151,6 +155,8 @@ OPENCODE_REPLY_FULL_OUTPUT=true
 - 同时跑了多个 WS/HTTP 实例。
 - HTTP 回调和 WS 同时订阅同一个事件。
 - 状态文件不是同一个 `BRIDGE_STATE_PATH`。
+- 开启了 `BRIDGE_AUTO_TRIGGER_WITHOUT_MENTION=true` 后，每张外部 `interactive` 卡片都会触发。普通讨论不会自动触发；如果仍重复回复，优先检查是否同一张告警卡片被上游重复发送成了多个不同消息。
+- 同类告警会按 fingerprint 在 `BRIDGE_AUTO_REUSE_WINDOW_SECONDS` 内复用结论。如果 fingerprint 提取字段过少，不同告警可能被当成同类；建议上游卡片带上告警名称、级别、服务和环境。
 
 ### 飞书回调失败
 

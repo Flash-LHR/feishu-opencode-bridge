@@ -1,12 +1,13 @@
 # Feishu OpenCode Bridge
 
-Feishu OpenCode Bridge 是一个 Python 服务：当用户在飞书消息话题里 @ 机器人时，服务读取该话题上下文，调用本机 `opencode run`，再把结果回复回同一话题。
+Feishu OpenCode Bridge 是一个 Python 服务：当用户在飞书消息话题里 @ 机器人时，服务读取该话题上下文，调用本机 `opencode run`，再把结果回复回同一话题。也可以通过配置开启无需 @ 的自动触发模式，用于 oncall 告警群。
 
 核心行为：
 
 - 首次 @ 某个话题时，用可读取的话题上下文创建一个 OpenCode session。
 - 后续同一话题复用同一个 OpenCode session，只把上次成功调用之后的新增消息发给 OpenCode。
 - 普通话题回复不会立即触发机器人，但会在下一次 @ 机器人时作为增量上下文补给 OpenCode。
+- 开启 `BRIDGE_AUTO_TRIGGER_WITHOUT_MENTION=true` 后，外部 `interactive` 告警卡片会进入 oncall 策略层：先过滤、限流、复用同类告警结论，必要时再调用 OpenCode。
 - 支持解析飞书 `interactive` 卡片正文、真实用户名、模型查看/切换、话题级 `/reset`。
 - 附带本地 `/cards` 页面，用于发送测试卡片并验证卡片解析链路。
 
