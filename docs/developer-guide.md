@@ -32,9 +32,22 @@ Feishu event
   -> feishu_event.normalize_incoming_event
   -> StateStore.mark_event_seen 去重
   -> StateStore.append_message 缓存消息
-  -> 非机器人消息且命中 @
+  -> 命中 @，或开启自动触发且是外部 interactive 卡片
   -> TopicLocks 按 topic_id 串行化
-  -> 命令分支或 OpenCode 分支
+  -> 命令分支、手动 OpenCode 分支或自动 OpenCode 分支
+```
+
+自动触发由 `BRIDGE_AUTO_TRIGGER_WITHOUT_MENTION` 控制。自动分支只处理外部 `interactive` 卡片，并且当前话题已有 OpenCode session 时不会再次自动触发；当前应用自己的消息不会触发。
+
+自动分支会先进入 `oncall.py` 策略层：
+
+```text
+card text
+  -> parse_alert 提取 name / severity / service / environment / fingerprint
+  -> 忽略级别和关键词判断
+  -> fingerprint 近期结论复用
+  -> 每日自动分析限流
+  -> 调用 OpenCode，并把成功结论写入 oncall 状态
 ```
 
 OpenCode 分支：
@@ -126,6 +139,7 @@ StateStore.set_topic_session
 | `seen_events` | 事件去重缓存 |
 | `sessions` | 飞书话题到 OpenCode session 的绑定 |
 | `threads` | 本地话题消息缓存 |
+| `oncall` | 自动告警分析的每日计数和 fingerprint 结论缓存 |
 | `users` | 用户 ID 到显示名缓存 |
 
 不要把状态文件提交到仓库。

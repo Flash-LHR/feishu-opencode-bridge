@@ -15,7 +15,12 @@ class PromptBuilder:
         self._identity = identity
         self._users = users
 
-    def input_messages(self, messages: Iterable[MessageRecord]) -> List[MessageRecord]:
+    def input_messages(
+        self,
+        messages: Iterable[MessageRecord],
+        include_app_messages: bool = False,
+        include_command_messages: bool = False,
+    ) -> List[MessageRecord]:
         result: List[MessageRecord] = []
         for message in messages:
             text = self.message_text(message)
@@ -23,9 +28,13 @@ class PromptBuilder:
                 continue
             if self._identity.is_own_message(message) and message.message_type != "interactive":
                 continue
-            if self._identity.is_app_sender(message) and message.message_type != "interactive":
+            if (
+                not include_app_messages
+                and self._identity.is_app_sender(message)
+                and message.message_type != "interactive"
+            ):
                 continue
-            if text.startswith("/"):
+            if not include_command_messages and text.startswith("/"):
                 continue
             result.append(message)
         return result

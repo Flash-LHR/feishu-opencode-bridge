@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from dataclasses import replace
 from typing import Dict, Optional
 
 from .commands import CommandHandler
@@ -10,6 +11,7 @@ from .config import Settings
 from .feishu_event import normalize_incoming_event
 from .identity import BotIdentity
 from .message_content import split_text
+from .oncall import OncallPolicy, alert_summary, reuse_reply
 from .opencode import OpenCodeError
 from .ports import FeishuGateway, OpenCodeGateway
 from .prompt import PromptBuilder
@@ -54,6 +56,7 @@ class FeishuOpenCodeBot:
         self._prompt = PromptBuilder(settings, self._identity, self._users)
         self._topic_context = TopicContextBuilder(settings, feishu, state, self._prompt)
         self._commands = CommandHandler(settings, state, opencode)
+        self._oncall = OncallPolicy(settings, state)
 
     def handle_raw_event(self, data: object) -> None:
         incoming = normalize_incoming_event(
@@ -69,14 +72,29 @@ class FeishuOpenCodeBot:
 
         topic_id = incoming.message.topic_id
         self._state.append_message(topic_id, incoming.message)
-        if self._identity.is_app_sender(incoming.message):
-            return
-        if not incoming.is_mentioned:
+
+        is_manual_trigger = incoming.is_mentioned and not self._identity.is_app_sender(incoming.message)
+        is_auto_trigger = self._should_auto_trigger(incoming)
+        if not is_manual_trigger and not is_auto_trigger:
             return
 
         lock = self._topic_locks.get(topic_id)
         with lock:
-            self._handle_mentioned_message(incoming)
+            if is_manual_trigger:
+                self._handle_mentioned_message(incoming)
+            else:
+                self._handle_auto_triggered_message(incoming)
+
+    def _should_auto_trigger(self, incoming: IncomingEvent) -> bool:
+        if not self._settings.auto_trigger_without_mention:
+            return False
+        if self._identity.is_own_message(incoming.message):
+            return False
+        if incoming.message.message_type != "interactive":
+            return False
+        if self._state.get_topic_session(incoming.message.topic_id):
+            return False
+        return bool(incoming.clean_text.strip())
 
     def _handle_mentioned_message(self, incoming: IncomingEvent) -> None:
         text = incoming.clean_text.strip()
@@ -89,21 +107,72 @@ class FeishuOpenCodeBot:
             self._reply(incoming, response.text, seed_suffix=response.seed_suffix)
             return
 
+        self._handle_opencode_message(incoming)
+
+    def _handle_auto_triggered_message(self, incoming: IncomingEvent) -> None:
+        if not incoming.clean_text.strip():
+            return
+        decision = self._oncall.decide(incoming)
+        if decision.should_reuse:
+            logger.info("Oncall reused conclusion %s", alert_summary(decision.alert))
+            self._reply(incoming, reuse_reply(decision.reused_output), seed_suffix="oncall-reuse")
+            return
+        if not decision.should_analyze:
+            logger.info("Oncall skipped alert reason=%s %s", decision.reason, alert_summary(decision.alert))
+            return
+
+        prompt_prefix = "\n".join(
+            item
+            for item in (
+                self._settings.auto_trigger_prompt,
+                f"结构化告警：{alert_summary(decision.alert)}",
+            )
+            if item
+        )
+        output = self._handle_opencode_message(
+            incoming,
+            include_app_messages=True,
+            include_command_messages=True,
+            prompt_prefix=prompt_prefix,
+            seed_suffix="auto-opencode",
+        )
+        if output:
+            self._oncall.record_success(decision, incoming, output)
+        else:
+            self._oncall.record_failure(decision)
+
+    def _handle_opencode_message(
+        self,
+        incoming: IncomingEvent,
+        include_app_messages: bool = False,
+        include_command_messages: bool = False,
+        prompt_prefix: Optional[str] = None,
+        seed_suffix: str = "opencode",
+    ) -> Optional[str]:
         if self._settings.send_processing_message:
             self._reply(incoming, "收到，正在让 OpenCode 处理。", record=False, seed_suffix="processing")
 
         processing_reaction_id = self._add_processing_reaction(incoming)
         try:
-            payload = self._topic_context.build_payload(incoming)
+            payload = self._topic_context.build_payload(
+                incoming,
+                include_app_messages=include_app_messages,
+                include_command_messages=include_command_messages,
+            )
+            if prompt_prefix:
+                payload = replace(payload, prompt=f"{prompt_prefix.strip()}\n\n{payload.prompt}".strip())
             result = self._run_opencode(incoming, payload)
             self._remember_opencode_session(payload, result.session_id)
-            self._reply(incoming, result.output, seed_suffix="opencode")
+            self._reply(incoming, result.output, seed_suffix=seed_suffix)
+            return result.output
         except OpenCodeError as exc:
             logger.warning("OpenCode call failed: %s", exc)
             self._reply(incoming, f"OpenCode 调用失败：{exc}")
+            return None
         except Exception as exc:
             logger.exception("Message handling failed")
             self._reply(incoming, f"处理失败：{exc}")
+            return None
         finally:
             self._finish_processing_reactions(incoming, processing_reaction_id)
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 try:
     from dotenv import load_dotenv
@@ -60,6 +60,13 @@ def _get_optional_default(name: str, default: Optional[str]) -> Optional[str]:
     return value or None
 
 
+def _get_csv(name: str, default: str = "") -> List[str]:
+    value = os.getenv(name, default).strip()
+    if not value or value.lower() in {"0", "false", "no", "none", "off", "disabled"}:
+        return []
+    return [item.strip().lower() for item in value.split(",") if item.strip()]
+
+
 @dataclass(frozen=True)
 class Settings:
     feishu_app_id: str
@@ -92,6 +99,13 @@ class Settings:
     send_processing_message: bool
     processing_reaction_emoji: Optional[str]
     done_reaction_emoji: Optional[str]
+    auto_trigger_without_mention: bool
+    auto_trigger_prompt: Optional[str]
+    auto_ignore_severities: List[str]
+    auto_ignore_keywords: List[str]
+    auto_daily_limit: int
+    auto_daily_limit_timezone: str
+    auto_reuse_window_seconds: int
     card_sender_webhook: Optional[str] = None
     card_sender_chat_id: Optional[str] = None
 
@@ -137,6 +151,20 @@ class Settings:
             send_processing_message=_get_bool("BRIDGE_SEND_PROCESSING_MESSAGE", False),
             processing_reaction_emoji=_get_optional_default("FEISHU_PROCESSING_REACTION_EMOJI", "Typing"),
             done_reaction_emoji=_get_optional_default("FEISHU_DONE_REACTION_EMOJI", "DONE"),
+            auto_trigger_without_mention=_get_bool("BRIDGE_AUTO_TRIGGER_WITHOUT_MENTION", False),
+            auto_trigger_prompt=_get_optional_default(
+                "BRIDGE_AUTO_TRIGGER_PROMPT",
+                (
+                    "请作为 oncall 助手处理下面这条飞书消息或告警。"
+                    "如果这是告警，请给出结论、影响、证据和建议动作；"
+                    "如果信息不足，请明确还需要什么。"
+                ),
+            ),
+            auto_ignore_severities=_get_csv("BRIDGE_AUTO_IGNORE_SEVERITIES"),
+            auto_ignore_keywords=_get_csv("BRIDGE_AUTO_IGNORE_KEYWORDS"),
+            auto_daily_limit=max(0, _get_int("BRIDGE_AUTO_DAILY_LIMIT", 0)),
+            auto_daily_limit_timezone=os.getenv("BRIDGE_AUTO_DAILY_LIMIT_TIMEZONE", "Asia/Shanghai").strip(),
+            auto_reuse_window_seconds=max(0, _get_int("BRIDGE_AUTO_REUSE_WINDOW_SECONDS", 86400)),
             card_sender_webhook=_get_optional("CARD_SENDER_WEBHOOK"),
             card_sender_chat_id=_get_optional("CARD_SENDER_CHAT_ID"),
         )

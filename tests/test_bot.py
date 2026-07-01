@@ -91,7 +91,16 @@ class FailingOpenCode(FakeOpenCode):
         raise OpenCodeError("boom")
 
 
-def _settings(path: Path) -> Settings:
+def _settings(
+    path: Path,
+    *,
+    auto_trigger: bool = False,
+    auto_trigger_prompt: str = "AUTO ONCALL",
+    auto_ignore_severities=None,
+    auto_ignore_keywords=None,
+    auto_daily_limit: int = 0,
+    auto_reuse_window_seconds: int = 86400,
+) -> Settings:
     return Settings(
         feishu_app_id="cli",
         feishu_app_secret="secret",
@@ -119,6 +128,13 @@ def _settings(path: Path) -> Settings:
         send_processing_message=False,
         processing_reaction_emoji="Typing",
         done_reaction_emoji="DONE",
+        auto_trigger_without_mention=auto_trigger,
+        auto_trigger_prompt=auto_trigger_prompt,
+        auto_ignore_severities=auto_ignore_severities or [],
+        auto_ignore_keywords=auto_ignore_keywords or [],
+        auto_daily_limit=auto_daily_limit,
+        auto_daily_limit_timezone="Asia/Shanghai",
+        auto_reuse_window_seconds=auto_reuse_window_seconds,
         card_sender_webhook=None,
         card_sender_chat_id=None,
     )
@@ -134,6 +150,7 @@ def _event(
     root_id: str = "",
     parent_id: str = "",
     sender_id=None,
+    sender_type: str = "user",
     create_time: int = 1710000000000,
 ):
     sender_id = sender_id or {"open_id": "ou_user"}
@@ -153,7 +170,7 @@ def _event(
         "event": {
             "sender": {
                 "sender_id": sender_id,
-                "sender_type": "user",
+                "sender_type": sender_type,
             },
             "message": {
                 "message_id": f"msg-{event_id}",
@@ -176,13 +193,15 @@ def _card_event(
     thread_id: str = "thread-1",
     sender_app_id: str = "cli_card_sender",
     create_time: int = 1710000000000,
+    title: str = "告警卡片",
+    markdown: str = "**服务异常**\n影响：OpenCode Bridge",
 ):
     card = {
         "schema": "2.0",
-        "header": {"title": {"tag": "plain_text", "content": "告警卡片"}, "template": "red"},
+        "header": {"title": {"tag": "plain_text", "content": title}, "template": "red"},
         "body": {
             "elements": [
-                {"tag": "markdown", "content": "**服务异常**\n影响：OpenCode Bridge"},
+                {"tag": "markdown", "content": markdown},
                 {
                     "tag": "button",
                     "text": {"tag": "plain_text", "content": "查看详情"},
@@ -549,6 +568,228 @@ def test_topic_reply_without_bot_mention_is_cached_but_not_triggered(tmp_path):
     assert not opencode.prompts
     assert not feishu.replies
     assert state.get_cached_messages("thread-1")[-1].text == "这是话题里的普通讨论"
+
+
+def test_group_message_without_bot_mention_is_not_auto_triggered_when_enabled(tmp_path):
+    feishu = FakeFeishu(user_names={"ou_user": "李浩然"})
+    opencode = FakeOpenCode()
+    state = StateStore(tmp_path / "state.json")
+    bot = FeishuOpenCodeBot(_settings(tmp_path / "state.json", auto_trigger=True), feishu, opencode, state)
+
+    bot.handle_raw_event(_event("P0 告警：checkout 错误率升高", event_id="evt1", mentioned=False))
+
+    assert not opencode.prompts
+    assert not feishu.replies
+
+
+def test_external_card_without_bot_mention_auto_triggers_when_enabled(tmp_path):
+    feishu = FakeFeishu()
+    opencode = FakeOpenCode()
+    state = StateStore(tmp_path / "state.json")
+    bot = FeishuOpenCodeBot(_settings(tmp_path / "state.json", auto_trigger=True), feishu, opencode, state)
+
+    bot.handle_raw_event(_card_event(event_id="card"))
+
+    assert opencode.prompts[0][0].startswith("AUTO ONCALL\n结构化告警：")
+    assert "机器人：告警卡片\n**服务异常**\n影响：OpenCode Bridge" in opencode.prompts[0][0]
+    assert feishu.replies[-1][1] == "OpenCode answer"
+
+
+def test_info_card_is_ignored_by_oncall_policy(tmp_path):
+    feishu = FakeFeishu()
+    opencode = FakeOpenCode()
+    state = StateStore(tmp_path / "state.json")
+    bot = FeishuOpenCodeBot(
+        _settings(tmp_path / "state.json", auto_trigger=True, auto_ignore_severities=["info"]),
+        feishu,
+        opencode,
+        state,
+    )
+
+    bot.handle_raw_event(
+        _card_event(
+            event_id="card",
+            markdown="告警名称：CPU 使用率\n告警级别：info\n服务：checkout",
+        )
+    )
+
+    assert not opencode.prompts
+    assert not feishu.replies
+
+
+def test_card_matching_ignore_keyword_is_not_analyzed(tmp_path):
+    feishu = FakeFeishu()
+    opencode = FakeOpenCode()
+    state = StateStore(tmp_path / "state.json")
+    bot = FeishuOpenCodeBot(
+        _settings(tmp_path / "state.json", auto_trigger=True, auto_ignore_keywords=["测试环境"]),
+        feishu,
+        opencode,
+        state,
+    )
+
+    bot.handle_raw_event(
+        _card_event(
+            event_id="card",
+            markdown="告警名称：CPU 使用率\n告警级别：critical\n环境：测试环境",
+        )
+    )
+
+    assert not opencode.prompts
+    assert not feishu.replies
+
+
+def test_daily_oncall_limit_stops_new_analysis(tmp_path):
+    feishu = FakeFeishu()
+    opencode = FakeOpenCode()
+    state = StateStore(tmp_path / "state.json")
+    bot = FeishuOpenCodeBot(
+        _settings(tmp_path / "state.json", auto_trigger=True, auto_daily_limit=1),
+        feishu,
+        opencode,
+        state,
+    )
+
+    bot.handle_raw_event(
+        _card_event(
+            event_id="card1",
+            thread_id="thread-1",
+            markdown="告警名称：A 服务错误率\n告警级别：critical\n服务：a",
+        )
+    )
+    bot.handle_raw_event(
+        _card_event(
+            event_id="card2",
+            thread_id="thread-2",
+            markdown="告警名称：B 服务错误率\n告警级别：critical\n服务：b",
+        )
+    )
+
+    assert len(opencode.prompts) == 1
+    assert len(feishu.replies) == 1
+
+
+def test_duplicate_card_reuses_recent_conclusion_without_opencode(tmp_path):
+    feishu = FakeFeishu()
+    opencode = FakeOpenCode()
+    state = StateStore(tmp_path / "state.json")
+    bot = FeishuOpenCodeBot(_settings(tmp_path / "state.json", auto_trigger=True), feishu, opencode, state)
+    markdown = "告警名称：checkout 错误率\n告警级别：critical\n服务：checkout\n环境：prod"
+
+    bot.handle_raw_event(_card_event(event_id="card1", thread_id="thread-1", markdown=markdown))
+    bot.handle_raw_event(_card_event(event_id="card2", thread_id="thread-2", markdown=markdown))
+
+    assert len(opencode.prompts) == 1
+    assert len(feishu.replies) == 2
+    assert "同类告警已在近期分析过" in feishu.replies[-1][1]
+    assert "OpenCode answer" in feishu.replies[-1][1]
+
+
+def test_app_text_without_bot_mention_is_not_auto_triggered_when_enabled(tmp_path):
+    feishu = FakeFeishu()
+    opencode = FakeOpenCode()
+    state = StateStore(tmp_path / "state.json")
+    bot = FeishuOpenCodeBot(_settings(tmp_path / "state.json", auto_trigger=True), feishu, opencode, state)
+
+    bot.handle_raw_event(
+        _event(
+            "告警：api latency p99 > 2s",
+            event_id="evt1",
+            mentioned=False,
+            sender_id={"app_id": "cli_alert_sender"},
+            sender_type="app",
+        )
+    )
+
+    assert not opencode.prompts
+    assert not feishu.replies
+
+
+def test_auto_trigger_does_not_execute_slash_command_without_mention(tmp_path):
+    feishu = FakeFeishu(user_names={"ou_user": "李浩然"})
+    opencode = FakeOpenCode()
+    state = StateStore(tmp_path / "state.json")
+    bot = FeishuOpenCodeBot(_settings(tmp_path / "state.json", auto_trigger=True), feishu, opencode, state)
+
+    bot.handle_raw_event(_event("/ping", event_id="evt1", mentioned=False))
+
+    assert not opencode.prompts
+    assert not feishu.replies
+
+
+def test_discussion_after_auto_card_is_cached_but_not_auto_triggered(tmp_path):
+    feishu = FakeFeishu(user_names={"ou_user": "李浩然"})
+    opencode = FakeOpenCode()
+    state = StateStore(tmp_path / "state.json")
+    bot = FeishuOpenCodeBot(_settings(tmp_path / "state.json", auto_trigger=True), feishu, opencode, state)
+
+    bot.handle_raw_event(_card_event(event_id="card"))
+    bot.handle_raw_event(
+        _event(
+            "我看了下像是发布导致",
+            event_id="evt2",
+            mentioned=False,
+            thread_id="thread-1",
+            root_id="msg-card",
+            parent_id="msg-card",
+            create_time=1710000001000,
+        )
+    )
+
+    assert len(opencode.prompts) == 1
+    assert len(feishu.replies) == 1
+    assert any(message.text == "我看了下像是发布导致" for message in state.get_cached_messages("thread-1"))
+
+
+def test_discussion_after_auto_card_can_continue_when_mentioned(tmp_path):
+    feishu = FakeFeishu(user_names={"ou_user": "李浩然"})
+    opencode = FakeOpenCode()
+    state = StateStore(tmp_path / "state.json")
+    bot = FeishuOpenCodeBot(_settings(tmp_path / "state.json", auto_trigger=True), feishu, opencode, state)
+
+    bot.handle_raw_event(_card_event(event_id="card"))
+    bot.handle_raw_event(
+        _event(
+            "我看了下像是发布导致",
+            event_id="evt2",
+            mentioned=False,
+            thread_id="thread-1",
+            root_id="msg-card",
+            parent_id="msg-card",
+            create_time=1710000001000,
+        )
+    )
+    bot.handle_raw_event(
+        _event(
+            "@_user_1 基于刚才讨论给下一步建议",
+            event_id="evt3",
+            mentioned=True,
+            thread_id="thread-1",
+            root_id="msg-card",
+            parent_id="msg-card",
+            create_time=1710000002000,
+        )
+    )
+
+    assert opencode.session_ids == [None, "ses_test"]
+    assert opencode.prompts[1][0] == (
+        "李浩然：我看了下像是发布导致\n"
+        "李浩然：基于刚才讨论给下一步建议"
+    )
+    assert len(feishu.replies) == 2
+
+
+def test_own_app_interactive_card_does_not_auto_trigger(tmp_path):
+    feishu = FakeFeishu()
+    opencode = FakeOpenCode()
+    state = StateStore(tmp_path / "state.json")
+    bot = FeishuOpenCodeBot(_settings(tmp_path / "state.json", auto_trigger=True), feishu, opencode, state)
+
+    bot.handle_raw_event(_card_event(event_id="card", sender_app_id="cli"))
+
+    assert not opencode.prompts
+    assert not feishu.replies
+    assert state.get_cached_messages("thread-1")[-1].message_id == "msg-card"
 
 
 def test_direct_p2p_message_still_triggers_without_mention(tmp_path):

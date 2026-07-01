@@ -149,6 +149,13 @@ contact:contact.base:readonly
 | `BRIDGE_HISTORY_PAGE_LIMIT` | `5` | 读取历史消息页数上限 |
 | `BRIDGE_MODEL_LIST_MAX_CHARS` | `8000` | `/model` 返回模型列表最大长度 |
 | `BRIDGE_SEND_PROCESSING_MESSAGE` | `false` | 是否额外发送“正在处理”文本消息 |
+| `BRIDGE_AUTO_TRIGGER_WITHOUT_MENTION` | `false` | 是否让外部 `interactive` 卡片无需 @ 也自动触发 OpenCode |
+| `BRIDGE_AUTO_TRIGGER_PROMPT` | oncall 默认提示词 | 自动触发时加在消息上下文前的处理要求；设为 `off` 可不追加 |
+| `BRIDGE_AUTO_IGNORE_SEVERITIES` | 空 | 自动触发前静默跳过的告警级别，逗号分隔，例如 `info,notice` |
+| `BRIDGE_AUTO_IGNORE_KEYWORDS` | 空 | 自动触发前静默跳过的关键词，逗号分隔，例如 `测试环境,已恢复` |
+| `BRIDGE_AUTO_DAILY_LIMIT` | `0` | 每天最多新增自动分析次数；`0` 表示不限，复用结论不计入 |
+| `BRIDGE_AUTO_DAILY_LIMIT_TIMEZONE` | `Asia/Shanghai` | 每日限流使用的日期时区 |
+| `BRIDGE_AUTO_REUSE_WINDOW_SECONDS` | `86400` | 同类告警复用上次结论的时间窗口；`0` 表示不复用 |
 
 ### OpenCode 配置
 
@@ -194,3 +201,11 @@ feishu-opencode-bridge ws
 ```
 
 如果能列出模型，说明 OpenCode CLI 可正常运行。
+
+如果开启了自动触发模式，可以让上游告警机器人发送一张 `interactive` 告警卡片，不需要 @ 机器人。也可以用本地 `/cards` 页面通过 `CARD_SENDER_WEBHOOK` 发送一张外部 webhook 测试卡片：
+
+```text
+http://127.0.0.1:8000/cards
+```
+
+机器人回复 OpenCode 结果即表示自动触发链路可用。普通文本消息不会自动触发；如果 `/cards` 使用 `CARD_SENDER_CHAT_ID` 让当前应用自己发卡片，也不会自动触发。
